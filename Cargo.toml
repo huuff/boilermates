@@ -13,3 +13,5 @@ boilermates-impl = { path = "./crates/boilermates-impl" }
 proc-macro2 = { version = "1" }
 syn = { version = "1" }
 quote = { version = "1" }
+prettyplease = { version = "0.1" }
+insta = { version = "1" }

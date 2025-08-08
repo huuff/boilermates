@@ -479,18 +479,24 @@ fn snake_to_pascal(s: &str) -> String {
 
 #[cfg(test)]
 mod test {
-  use super::*;
+  use crate::util::pretty_print;
+
+use super::*;
     use quote::quote;
 
 
   #[test]
   fn sanity_check() {
-    let output = boilermates(quote! { "AlternativeStruct" }, quote! {
+    let output = boilermates(quote! { "StructWithX", "StructWithoutY" }, quote! {
       pub struct MainStruct {
         pub field: String,
+        #[boilermates(only_in = "StructWithX")]
+        pub x: u32,
+        #[boilermates(not_in = "StructWithoutY")]
+        pub y: i32,
       }
     });
 
-    eprintln!("{output}");
+    insta::assert_snapshot!(pretty_print(output));
   }
 }

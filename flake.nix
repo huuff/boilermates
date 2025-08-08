@@ -14,9 +14,10 @@
       };
     in {
       devShells.default = pkgs.mkShell {
-        buildInputs = [
-          pkgs.nil
-          (pkgs.rust-bin.stable.latest.default.override {
+        buildInputs = with pkgs; [
+          nil
+          cargo-insta
+          (rust-bin.stable.latest.default.override {
             extensions = [ "rust-analyzer" "rust-src" ];
           })
         ];

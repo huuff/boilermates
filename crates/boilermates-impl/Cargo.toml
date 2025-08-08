@@ -9,4 +9,5 @@ proc-macro2 = { workspace = true }
 quote = { workspace = true } 
 
 [dev-dependencies]
-prettyplease = { version = "0.2" }
+prettyplease = { workspace = true }
+insta = { workspace = true }
