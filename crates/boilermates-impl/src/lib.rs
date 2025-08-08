@@ -1,5 +1,6 @@
 mod util;
 
+use heck::{ToPascalCase, ToSnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use quote::quote;
@@ -26,11 +27,11 @@ impl FieldConfig {
     }
 
     fn trait_name(&self) -> Ident {
-        Ident::new(&format!("Has{}", snake_to_pascal(&self.name().to_string())), Span::call_site())
+        Ident::new(&format!("Has{}", &self.name().to_string().to_pascal_case()), Span::call_site())
     }
 
     fn neg_trait_name(&self) -> Ident {
-        Ident::new(&format!("HasNo{}", snake_to_pascal(&self.name().to_string())), Span::call_site())
+        Ident::new(&format!("HasNo{}", &self.name().to_string().to_pascal_case()), Span::call_site())
     }
 }
 
@@ -408,12 +409,12 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                     });
 
                 let into_defaults_fn_name = Ident::new(
-                    &pascal_to_snake(&format!("into{}_defaults", name)),
+                    &format!("into{}_defaults", name).to_snake_case(),
                     Span::call_site()
                 );
                 
                 let into_fn_name = Ident::new(
-                    &pascal_to_snake(&format!("into{}", name)),
+                    &format!("into{}", name).to_snake_case(),
                     Span::call_site()
                 );
 
@@ -447,33 +448,6 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
     };
 
     output.into()
-}
-
-fn pascal_to_snake(s: &str) -> String {
-    let mut result = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && c.is_uppercase() {
-            result.push('_');
-        }
-        result.push(c.to_ascii_lowercase());
-    }
-    result
-}
-
-fn snake_to_pascal(s: &str) -> String {
-    let mut result = String::new();
-    let mut capitalize = true;
-    for c in s.chars() {
-        if c == '_' {
-            capitalize = true;
-        } else if capitalize {
-            result.push(c.to_ascii_uppercase());
-            capitalize = false;
-        } else {
-            result.push(c);
-        }
-    }
-    result
 }
 
 #[cfg(test)]
