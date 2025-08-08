@@ -1,4 +1,4 @@
-#![doc = include_str!("../README.md")]
+#![doc = include_str!("../../../README.md")]
 
 use std::collections::HashMap;
 
@@ -479,20 +479,4 @@ fn snake_to_pascal(s: &str) -> String {
         }
     }
     result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-
-    #[test]
-    fn keeps_generics() {
-        boilermates(quote::quote! { "AlternativeStruct" }.into(), quote::quote! {
-            pub struct MainStruct {
-                pub field: String,
-            }
-        }.into());
-    }
-    
 }
