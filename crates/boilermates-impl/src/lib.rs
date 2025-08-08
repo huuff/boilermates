@@ -1,7 +1,6 @@
 mod util;
 
-use std::collections::HashMap;
-
+use indexmap::IndexMap;
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
@@ -78,8 +77,8 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
     let mut item: DeriveInput = syn::parse2(item).unwrap();
     let attrs: AttributeArgs = Punctuated::<NestedMeta, Token![,]>::parse_terminated.parse2(attrs).unwrap().into_iter().collect();
 
-    // let mut new_structs = Structs::new();
-    let mut structs = HashMap::<String, Struct>::new();
+    // indexmap so the order is deterministic and predictable
+    let mut structs = IndexMap::<String, Struct>::new();
     
     // Get the struct fields
     let Data::Struct(data_struct) = item.data.clone() else {

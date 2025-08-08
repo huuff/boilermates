@@ -7,6 +7,7 @@ edition = "2021"
 syn = { workspace = true, features = ["full"] }
 proc-macro2 = { workspace = true }
 quote = { workspace = true } 
+indexmap = { workspace = true }
 
 [dev-dependencies]
 prettyplease = { workspace = true }
