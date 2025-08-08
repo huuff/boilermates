@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
-    parse::Parser, parse_quote, punctuated::Punctuated, Attribute, AttributeArgs, Data, DataStruct, DeriveInput, Field, Fields, FieldsNamed, Lit, NestedMeta, Token
+    parse::Parser, parse_quote, punctuated::Punctuated, Attribute, Data, DataStruct, DeriveInput, Field, Fields, FieldsNamed, Lit, LitStr, Meta, Token
 };
 
 #[derive(Clone)]
@@ -75,7 +75,7 @@ impl Struct {
 
 pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
     let mut item: DeriveInput = syn::parse2(item).unwrap();
-    let attrs: AttributeArgs = Punctuated::<NestedMeta, Token![,]>::parse_terminated.parse2(attrs).unwrap().into_iter().collect();
+    let attrs = Punctuated::<LitStr, Token![,]>::parse_terminated.parse2(attrs).unwrap();
 
     // indexmap so the order is deterministic and predictable
     let mut structs = IndexMap::<String, Struct>::new();
@@ -93,21 +93,16 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
     // let module_name = Ident::new(&format!("boilermates{}", pascal_to_snake(&main.ident.to_string())), Span::call_site());
 
 
-    attrs.into_iter().for_each(|arg| {
-        match arg {
-            NestedMeta::Lit(Lit::Str(lit)) => {
-                let struct_name = lit.value().trim_matches('"').to_owned();
-                // new_structs.add(struct_name);
-                structs.insert(
-                    struct_name,
-                    Struct {
-                        attrs: vec![],
-                        fields: vec![],
-                    },
-                );
-            }
-            _ => panic!("Expected a string literal"),
-        }
+    attrs.iter().for_each(|lit| {
+        let struct_name = lit.value();
+        // new_structs.add(struct_name);
+        structs.insert(
+            struct_name,
+            Struct {
+                attrs: vec![],
+                fields: vec![],
+            },
+        );
         // eprintln!("Arg: {}", q);
     });
 
@@ -117,48 +112,56 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
     // Check if attributes are of the following format "#[boilermates(attr_for({x}, {y}))]"
     // and extract {x} and {y}
     item.attrs.retain(|attr| {
-        let Ok(meta) = attr.parse_meta() else { return true };
-        let syn::Meta::List(list) = meta  else { return true };
+        let syn::Meta::List(list) = &attr.meta  else { return true };
         let Some(name) = list.path.get_ident() else { return true };
         if name != "boilermates" {
             return true;
         }
-        match list.nested.first() {
-            Some(syn::NestedMeta::Meta(syn::Meta::List(nv))) => {
+        let Ok(nested) = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) else { return true };
+        match nested.first() {
+            Some(Meta::List(nv)) => {
                 let Some(ident) = nv.path.get_ident() else { return true };
                 match ident.to_string().as_str() {
-                    "attr_for" => match (
-                        nv.nested.len(),
-                        nv.nested.iter().next(),
-                        nv.nested.iter().nth(1),
-                    ) {
-                        (
-                            2,
-                            Some(NestedMeta::Lit(Lit::Str(strukt))),
-                            Some(NestedMeta::Lit(Lit::Str(attr_lit))),
-                        ) => {
-                            let attr_tokens: TokenStream2 = attr_lit
-                                .value()
-                                .trim_matches('"')
-                                .parse()
-                                .unwrap_or_else(|e| panic!("Could not parse attribute: {}", e));
-                            let q = quote! {#attr_tokens};
-                            let attr = parse_quote!(#q);
-                            structs
-                                .get_mut(strukt.value().trim_matches('"'))
-                                .unwrap_or_else(|| panic!("Struct `{}` not declared", strukt.value()))
-                                .attrs
-                                .push(attr);
+                    "attr_for" => {
+                        let Ok(args) = nv.parse_args_with(Punctuated::<Lit, Token![,]>::parse_terminated) else {
+                            panic!(
+                                "`#[boilermates(attr_for(...))]` must have two string literal arguments"
+                            )
+                        };
+                        if args.len() == 2 {
+                            if let (Lit::Str(strukt), Lit::Str(attr_lit)) = (&args[0], &args[1]) {
+                                let attr_tokens: TokenStream2 = attr_lit
+                                    .value()
+                                    .trim_matches('"')
+                                    .parse()
+                                    .unwrap_or_else(|e| {
+                                        panic!("Could not parse attribute: {}", e)
+                                    });
+                                let q = quote! {#attr_tokens};
+                                let attr = parse_quote!(#q);
+                                structs
+                                    .get_mut(strukt.value().trim_matches('"'))
+                                    .unwrap_or_else(|| {
+                                        panic!("Struct `{}` not declared", strukt.value())
+                                    })
+                                    .attrs
+                                    .push(attr);
+                            } else {
+                                panic!(
+                                    "`#[boilermates(attr_for(...))]` must have two string literal arguments"
+                                )
+                            }
+                        } else {
+                            panic!(
+                                "`#[boilermates(attr_for(...))]` must have two string literal arguments"
+                            )
                         }
-                        _ => panic!(
-                            "`#[boilermates(attr_for(...))]` must have two string literal arguments"
-                        ),
-                    },
+                    }
                     _ => panic!("Unknown attrbute `#[boilermates({})]`", ident),
                 }
             }
 
-            // Some(syn::NestedMeta::Meta(syn::Meta::Path(path))) => {
+            // Some(syn::Meta::Path(path)) => {
             //     let Some(ident) = path.get_ident() else { return true };
             //     match ident.to_string().as_str() {
             //         "reexport" => reexport = true,
@@ -174,12 +177,10 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
 
     fn extract_nested_list(meta_list: &syn::MetaList) -> Vec<String> {
         meta_list
-            .nested
+            .parse_args_with(Punctuated::<LitStr, Token![,]>::parse_terminated)
+            .unwrap()
             .iter()
-            .map(|n| match n {
-                NestedMeta::Lit(Lit::Str(lit)) => lit.value().trim_matches('"').to_owned(),
-                _ => panic!("Expected a string literal"),
-            })
+            .map(|lit| lit.value())
             .collect()
     }
 
@@ -197,12 +198,12 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
         let mut add_to = structs.keys().cloned().collect::<Vec<_>>();
         let mut default = false;
         field.attrs.retain(|attr| {
-            let Ok(meta) = attr.parse_meta() else { return true };
-            let syn::Meta::List(list) = meta  else { return true };
+            let syn::Meta::List(list) = &attr.meta  else { return true };
             let Some(name) = list.path.get_ident() else { return true };
             if name != "boilermates" { return true }
-            match list.nested.first() {
-                Some(syn::NestedMeta::Meta(syn::Meta::List(nv))) => {
+            let Ok(nested) = list.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) else { return true };
+            match nested.first() {
+                Some(Meta::List(nv)) => {
                     let Some(ident) = nv.path.get_ident() else { panic!("#[boilermates] parsing error") };
                     let ident = ident.to_string();
                     if ident == "only_in" {
@@ -242,7 +243,7 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                     }
                 }
 
-                Some(syn::NestedMeta::Meta(syn::Meta::Path(path))) => {
+                Some(Meta::Path(path)) => {
                     let Some(ident) = path.get_ident() else { panic!("#[boilermates] parsing error") };
                     match ident.to_string().as_str() {
                         "default" => default = true,
