@@ -1,13 +1,11 @@
-#![doc = include_str!("../README.md")]
+mod util;
 
 use std::collections::HashMap;
 
-use proc_macro::TokenStream;
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
-    parse_macro_input, parse_quote, Attribute, AttributeArgs, Data, DataStruct, DeriveInput, Field,
-    Fields, FieldsNamed, Lit, NestedMeta,
+    parse::Parser, parse_quote, punctuated::Punctuated, Attribute, AttributeArgs, Data, DataStruct, DeriveInput, Field, Fields, FieldsNamed, Lit, NestedMeta, Token
 };
 
 #[derive(Clone)]
@@ -76,16 +74,15 @@ impl Struct {
     }
 }
 
-#[proc_macro_attribute]
-pub fn boilermates(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
+    let mut item: DeriveInput = syn::parse2(item).unwrap();
+    let attrs: AttributeArgs = Punctuated::<NestedMeta, Token![,]>::parse_terminated.parse2(attrs).unwrap().into_iter().collect();
+
     // let mut new_structs = Structs::new();
     let mut structs = HashMap::<String, Struct>::new();
-
-    // Parse the input item
-    let mut main = parse_macro_input!(item as DeriveInput);
     
     // Get the struct fields
-    let Data::Struct(data_struct) = main.data.clone() else {
+    let Data::Struct(data_struct) = item.data.clone() else {
         panic!("Expected a struct");
     };
     
@@ -96,9 +93,8 @@ pub fn boilermates(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Inline module name
     // let module_name = Ident::new(&format!("boilermates{}", pascal_to_snake(&main.ident.to_string())), Span::call_site());
 
-    // Parse the attribute arguments
-    let args = parse_macro_input!(attr as AttributeArgs);
-    args.into_iter().for_each(|arg| {
+
+    attrs.into_iter().for_each(|arg| {
         match arg {
             NestedMeta::Lit(Lit::Str(lit)) => {
                 let struct_name = lit.value().trim_matches('"').to_owned();
@@ -121,7 +117,7 @@ pub fn boilermates(attr: TokenStream, item: TokenStream) -> TokenStream {
 
     // Check if attributes are of the following format "#[boilermates(attr_for({x}, {y}))]"
     // and extract {x} and {y}
-    main.attrs.retain(|attr| {
+    item.attrs.retain(|attr| {
         let Ok(meta) = attr.parse_meta() else { return true };
         let syn::Meta::List(list) = meta  else { return true };
         let Some(name) = list.path.get_ident() else { return true };
@@ -189,9 +185,9 @@ pub fn boilermates(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     structs.insert(
-        main.ident.to_string(),
+        item.ident.to_string(),
         Struct {
-            attrs: main.attrs.clone(),
+            attrs: item.attrs.clone(),
             fields: vec![],
         },
     );
@@ -251,7 +247,7 @@ pub fn boilermates(attr: TokenStream, item: TokenStream) -> TokenStream {
                     let Some(ident) = path.get_ident() else { panic!("#[boilermates] parsing error") };
                     match ident.to_string().as_str() {
                         "default" => default = true,
-                        "only_in_self" => add_to = vec![main.ident.to_string()],
+                        "only_in_self" => add_to = vec![item.ident.to_string()],
                         _ => panic!("Unknown attrbute `#[boilermates({})]`", ident),
                     }
                 }
@@ -323,7 +319,7 @@ pub fn boilermates(attr: TokenStream, item: TokenStream) -> TokenStream {
                 ..data_struct
             }),
             ident: Ident::new(name, Span::call_site()),
-            ..main.clone()
+            ..item.clone()
         };
         output = quote! {
             #output
@@ -482,17 +478,25 @@ fn snake_to_pascal(s: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod test {
+  use crate::util::pretty_print;
+
+use super::*;
+    use quote::quote;
 
 
-    #[test]
-    fn keeps_generics() {
-        boilermates(quote::quote! { "AlternativeStruct" }.into(), quote::quote! {
-            pub struct MainStruct {
-                pub field: String,
-            }
-        }.into());
-    }
-    
+  #[test]
+  fn snapshot_test() {
+    let output = boilermates(quote! { "StructWithX", "StructWithoutY" }, quote! {
+      pub struct MainStruct {
+        pub field: String,
+        #[boilermates(only_in = "StructWithX")]
+        pub x: u32,
+        #[boilermates(not_in = "StructWithoutY")]
+        pub y: i32,
+      }
+    });
+
+    insta::assert_snapshot!(pretty_print(output));
+  }
 }

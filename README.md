@@ -25,7 +25,7 @@ Yes, it's not *that* bad, but the code ends up messy, just because you don't the
 
 Take for example the following code:
 
-```rust
+```rust,ignore
 use boilermates::boilermates;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -99,7 +99,7 @@ impl Default for ResponseCode {
 This will create 3 structs.
 
 First, `Orders`, will have all of the fields, except for `jwt_token`, which only exists in `OrderRequest` since `#[boilermates(only_in("OrderRequest"))]`, and `response_code` which only exists in `OrderResponse` because of `#[boilermates(only_in("OrderResponse"))]`.
-```rust
+```rust,ignore
 struct Order {
     user_id: u64,
     amount: u64,
@@ -114,7 +114,7 @@ struct Order {
 ```
 
 Then, `OrderRequest`, which won't have `id` since it's marked `#[boilermates(not_in("OrderRequest"))]`, `status` since it's not mentioned in `#[boilermates(only_in("Order", "OrderResponse"))]`, and `assigned_employee_id` because it's marked `#[boilermates(only_in_self)]`, which is synonymous with `#[boilermates(only_in("Order"))]`. It will however, have `jwt_token`:
-```rust
+```rust,ignore
 struct OrderRequest {
     user_id: u64,
     amount: u64,
@@ -127,7 +127,7 @@ struct OrderRequest {
 ```
 
 And finally, `OrderResponse`, which will have everything `Order` has plus the `response_code` field, but not `assigned_employee_id`, which is frankly none of the customer's business:
-```rust
+```rust,ignore
 struct OrderResponse {
     user_id: u64,
     amount: u64,
@@ -144,22 +144,22 @@ struct OrderResponse {
 #### Conversion
 
 Now for the fun stuff. Let's say we've received a new order through the API, and we have an `OrderRequest` in the `request` variable. We can easily convert it to an `Order`, only filling in the missing data. We can do it in two ways. First, use the `into_order` method, which takes the arguments missing in `Order` in the order in which they're written in the original `struct` declaration. Its signature is `pub fn into_order(self, id: Uuid, status: OrderStatus assigned_employee_id: Option<u64> ) -> Order`, so we can do this:
-```rust
+```rust,ignore
 let order = request.into_order(Uuid::new_v4(), OrderStatus::Received, None);
 ```
 
 But, `status` and `assigned_employee_id` are marked as `#[boilermates(default)]`, so if we want to use the default values when converting to a type that has these fields, we can use:
-```rust
+```rust,ignore
 let order = request.into_order_defaults(Uuid::new_v4);
 ```
 
 Next, after we've successfully saved the order in the DB, we can convert it `OrderResponse` like so:
-```rust
+```rust,ignore
 let response = order.into_order_response(ResponseCode::Ok);
 ```
 
 But, since `ResponseCode` has a `Default` implementation, `return_code` is marked `#[boilermates(default)]`, and all other fields from `Order` are present in `OrderResponse`, we can do:
-```rust
+```rust,ignore
 let response = OrderResponse::from(order); // or `let response: OrderResponse = order.into()`
 ```
 
@@ -170,7 +170,7 @@ The `From`/`Into` conversion is implemented in all cases when conversion is poss
 Each field triggers the generation of a `Has{Field}` trait with a getter method `fn {field}(&self) -> &{field_type}`, and a setter method `fn set_{field}(&mut self, value: &{field_type})`, with an implementation for each struct that has field.
 
 Since the 3 structs share the much of the same data, they can implement some of the same functionality. For instance, if we'd like to find out what's the order total (remember `UNIT_PRICE` and `SHIPPING_PRICE` in the beginning of the example?), we can create a blanket implementation using the `HasAmount` and `HasShippingRequired` traits, which are implemented for all types that have the `amount` and `shipping_required` fields. It allows us to use the `amount()` and `shipping_required()` getter methods like so:
-```rust
+```rust,ignore
 // These work out of the box:
 request.set_amount(10);
 order.set_amount(10);
