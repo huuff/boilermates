@@ -1,10 +1,15 @@
 
 [workspace]
 members = [ 
-  #"crates/boilermates-impl",
   "crates/boilermates-macro",
-  "crates/boilermates"
+  "crates/boilermates",
+  "crates/boilermates-impl",
 ]
+resolver = "2"
 
 [workspace.dependencies]
 boilermates-macro = { path = "./crates/boilermates-macro" }
+boilermates-impl = { path = "./crates/boilermates-impl" }
+proc-macro2 = { version = "1" }
+syn = { version = "1" }
+quote = { version = "1" }

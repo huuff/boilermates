@@ -1,0 +1,12 @@
+[package]
+name = "boilermates-impl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+syn = { workspace = true, features = ["full"] }
+proc-macro2 = { workspace = true }
+quote = { workspace = true } 
+
+[dev-dependencies]
+prettyplease = { version = "0.2" }
