@@ -1,14 +1,14 @@
 mod attributes;
 mod util;
 
-use attributes::BoilermatesStructAttribute;
+use attributes::{BoilermatesFieldAttribute, BoilermatesStructAttribute};
 use heck::{ToPascalCase, ToSnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
-    parse::Parser, punctuated::Punctuated, Attribute, AttributeArgs, Data, DataStruct,
-    DeriveInput, Field, Fields, FieldsNamed, Lit, NestedMeta, Token,
+    parse::Parser, punctuated::Punctuated, Attribute, AttributeArgs, Data, DataStruct, DeriveInput,
+    Field, Fields, FieldsNamed, Lit, NestedMeta, Token,
 };
 
 #[derive(Clone)]
@@ -124,23 +124,16 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
         }
     });
 
-    for struct_attr in  BoilermatesStructAttribute::extract(&mut item.attrs).unwrap() {
+    for struct_attr in BoilermatesStructAttribute::extract(&mut item.attrs).unwrap() {
         match struct_attr {
             BoilermatesStructAttribute::AttrFor(attr_for) => {
-                structs.get_mut(&attr_for.target_struct).unwrap().attrs.push(attr_for.attribute);
-            },
+                structs
+                    .get_mut(&attr_for.target_struct)
+                    .unwrap()
+                    .attrs
+                    .push(attr_for.attribute);
+            }
         }
-    }
-    
-    fn extract_nested_list(meta_list: &syn::MetaList) -> Vec<String> {
-        meta_list
-            .nested
-            .iter()
-            .map(|n| match n {
-                NestedMeta::Lit(Lit::Str(lit)) => lit.value().trim_matches('"').to_owned(),
-                _ => panic!("Expected a string literal"),
-            })
-            .collect()
     }
 
     structs.insert(
@@ -156,66 +149,17 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
     fields.named.iter_mut().for_each(|field| {
         let mut add_to = structs.keys().cloned().collect::<Vec<_>>();
         let mut default = false;
-        field.attrs.retain(|attr| {
-            let Ok(meta) = attr.parse_meta() else { return true };
-            let syn::Meta::List(list) = meta  else { return true };
-            let Some(name) = list.path.get_ident() else { return true };
-            if name != "boilermates" { return true }
-            match list.nested.first() {
-                Some(syn::NestedMeta::Meta(syn::Meta::List(nv))) => {
-                    let Some(ident) = nv.path.get_ident() else { panic!("#[boilermates] parsing error") };
-                    let ident = ident.to_string();
-                    if ident == "only_in" {
-                        let nested = extract_nested_list(nv);
-                        if nested.is_empty() {
-                            panic!(
-                                "`#[boilermates(only_in(...))]` must have at least one argument"
-                            );
-                        }
-                        nested.iter().for_each(|n| {
-                            if !add_to.iter().any(|s| s == n.as_str()) {
-                                panic!(
-                                    "`#[boilermates(only_in(...))]` has undeclared struct name `{}`",
-                                    n
-                                );
-                            }
-                        });
-                        add_to.retain(|s| nested.iter().any(|n| s == n.as_str()));
-                    } else if ident == "not_in" {
-                        let nested = extract_nested_list(nv);
-                        if nested.is_empty() {
-                            panic!(
-                                "`#[boilermates(only_in(...))]` must have at least one argument"
-                            );
-                        }
-                        nested.iter().for_each(|n| {
-                            if !add_to.iter().any(|s| s == n.as_str()) {
-                                panic!(
-                                    "`#[boilermates(only_in(...))]` has undeclared struct name `{}`",
-                                    n
-                                );
-                            }
-                        });
-                        add_to.retain(|s| !nested.iter().any(|n| s == n.as_str()));
-                    } else {
-                        panic!("Unknown attrbute `#[boilermates({})]`", ident);
-                    }
-                }
 
-                Some(syn::NestedMeta::Meta(syn::Meta::Path(path))) => {
-                    let Some(ident) = path.get_ident() else { panic!("#[boilermates] parsing error") };
-                    match ident.to_string().as_str() {
-                        "default" => default = true,
-                        "only_in_self" => add_to = vec![item.ident.to_string()],
-                        _ => panic!("Unknown attrbute `#[boilermates({})]`", ident),
-                    }
+        for boilermates_attr in BoilermatesFieldAttribute::extract(&mut field.attrs).unwrap() {
+            match boilermates_attr {
+                BoilermatesFieldAttribute::OnlyIn(only_in) => add_to = only_in.0,
+                BoilermatesFieldAttribute::NotIn(not_in) => {
+                    add_to.retain(|strukt| !not_in.0.contains(&strukt))
                 }
-
-                _ => return true,
+                BoilermatesFieldAttribute::Default => default = true,
+                BoilermatesFieldAttribute::OnlyInSelf => add_to = vec![item.ident.to_string()],
             }
-            
-            false
-        });
+        }
 
         let field = FieldConfig::new(field.clone(), default);
         let trait_name = field.trait_name();
@@ -238,7 +182,7 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
 
             if add_to.contains(struct_name) {
                 strukt.fields.push(field.clone());
-                
+
                 traits = quote! {
                     #traits
                     impl #trait_name for #struct_ident {
@@ -257,7 +201,6 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                     impl #neg_trait_name for #struct_ident {}
                 };
             }
-
         });
     });
 
