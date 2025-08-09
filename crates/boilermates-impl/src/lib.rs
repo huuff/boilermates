@@ -1,11 +1,14 @@
+mod attributes;
 mod util;
 
+use attributes::BoilermatesStructAttribute;
 use heck::{ToPascalCase, ToSnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
-    parse::Parser, parse_quote, punctuated::Punctuated, Attribute, AttributeArgs, Data, DataStruct, DeriveInput, Field, Fields, FieldsNamed, Lit, NestedMeta, Token
+    parse::Parser, punctuated::Punctuated, Attribute, AttributeArgs, Data, DataStruct,
+    DeriveInput, Field, Fields, FieldsNamed, Lit, NestedMeta, Token,
 };
 
 #[derive(Clone)]
@@ -16,22 +19,28 @@ struct FieldConfig {
 
 impl FieldConfig {
     fn new(field: Field, default: bool) -> Self {
-        Self {
-            field,
-            default,
-        }
+        Self { field, default }
     }
 
     fn name(&self) -> Ident {
-        self.field.ident.clone().unwrap_or_else(|| panic!("Can't get field name. This should never happen."))
+        self.field
+            .ident
+            .clone()
+            .unwrap_or_else(|| panic!("Can't get field name. This should never happen."))
     }
 
     fn trait_name(&self) -> Ident {
-        Ident::new(&format!("Has{}", &self.name().to_string().to_pascal_case()), Span::call_site())
+        Ident::new(
+            &format!("Has{}", &self.name().to_string().to_pascal_case()),
+            Span::call_site(),
+        )
     }
 
     fn neg_trait_name(&self) -> Ident {
-        Ident::new(&format!("HasNo{}", &self.name().to_string().to_pascal_case()), Span::call_site())
+        Ident::new(
+            &format!("HasNo{}", &self.name().to_string().to_pascal_case()),
+            Span::call_site(),
+        )
     }
 }
 
@@ -61,14 +70,18 @@ struct Struct {
 impl Struct {
     fn missing_fields_from(&self, other: &Self) -> Vec<FieldConfig> {
         self.fields.iter().fold(vec![], |mut acc, field| {
-            if !other.fields.contains(field) { acc.push(field.clone()) }
+            if !other.fields.contains(field) {
+                acc.push(field.clone())
+            }
             acc
         })
     }
 
     fn same_fields_as(&self, other: &Self) -> Vec<FieldConfig> {
         self.fields.iter().fold(vec![], |mut acc, field| {
-            if other.fields.contains(field) { acc.push(field.clone()) }
+            if other.fields.contains(field) {
+                acc.push(field.clone())
+            }
             acc
         })
     }
@@ -76,23 +89,23 @@ impl Struct {
 
 pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
     let mut item: DeriveInput = syn::parse2(item).unwrap();
-    let attrs: AttributeArgs = Punctuated::<NestedMeta, Token![,]>::parse_terminated.parse2(attrs).unwrap().into_iter().collect();
+    let attrs: AttributeArgs = Punctuated::<NestedMeta, Token![,]>::parse_terminated
+        .parse2(attrs)
+        .unwrap()
+        .into_iter()
+        .collect();
 
     // indexmap so the order is deterministic and predictable
     let mut structs = IndexMap::<String, Struct>::new();
-    
+
     // Get the struct fields
     let Data::Struct(data_struct) = item.data.clone() else {
         panic!("Expected a struct");
     };
-    
+
     let Fields::Named(mut fields) = data_struct.fields.clone() else {
         panic!("Expected a struct with named fields");
     };
-
-    // Inline module name
-    // let module_name = Ident::new(&format!("boilermates{}", pascal_to_snake(&main.ident.to_string())), Span::call_site());
-
 
     attrs.into_iter().for_each(|arg| {
         match arg {
@@ -109,70 +122,16 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
             }
             _ => panic!("Expected a string literal"),
         }
-        // eprintln!("Arg: {}", q);
     });
 
-    // let mut reexport = false;
-    // let mut use_in_place = false;
-
-    // Check if attributes are of the following format "#[boilermates(attr_for({x}, {y}))]"
-    // and extract {x} and {y}
-    item.attrs.retain(|attr| {
-        let Ok(meta) = attr.parse_meta() else { return true };
-        let syn::Meta::List(list) = meta  else { return true };
-        let Some(name) = list.path.get_ident() else { return true };
-        if name != "boilermates" {
-            return true;
+    for struct_attr in  BoilermatesStructAttribute::extract(&mut item.attrs).unwrap() {
+        match struct_attr {
+            BoilermatesStructAttribute::AttrFor(attr_for) => {
+                structs.get_mut(&attr_for.target_struct).unwrap().attrs.push(attr_for.attribute);
+            },
         }
-        match list.nested.first() {
-            Some(syn::NestedMeta::Meta(syn::Meta::List(nv))) => {
-                let Some(ident) = nv.path.get_ident() else { return true };
-                match ident.to_string().as_str() {
-                    "attr_for" => match (
-                        nv.nested.len(),
-                        nv.nested.iter().next(),
-                        nv.nested.iter().nth(1),
-                    ) {
-                        (
-                            2,
-                            Some(NestedMeta::Lit(Lit::Str(strukt))),
-                            Some(NestedMeta::Lit(Lit::Str(attr_lit))),
-                        ) => {
-                            let attr_tokens: TokenStream2 = attr_lit
-                                .value()
-                                .trim_matches('"')
-                                .parse()
-                                .unwrap_or_else(|e| panic!("Could not parse attribute: {}", e));
-                            let q = quote! {#attr_tokens};
-                            let attr = parse_quote!(#q);
-                            structs
-                                .get_mut(strukt.value().trim_matches('"'))
-                                .unwrap_or_else(|| panic!("Struct `{}` not declared", strukt.value()))
-                                .attrs
-                                .push(attr);
-                        }
-                        _ => panic!(
-                            "`#[boilermates(attr_for(...))]` must have two string literal arguments"
-                        ),
-                    },
-                    _ => panic!("Unknown attrbute `#[boilermates({})]`", ident),
-                }
-            }
-
-            // Some(syn::NestedMeta::Meta(syn::Meta::Path(path))) => {
-            //     let Some(ident) = path.get_ident() else { return true };
-            //     match ident.to_string().as_str() {
-            //         "reexport" => reexport = true,
-            //         "use_in_place" => use_in_place = true,
-            //         _ => panic!("Unknown attrbute `#[boilermates({})]`", ident),
-            //     }
-            // }
-
-            _ => return true,
-        }
-        false
-    });
-
+    }
+    
     fn extract_nested_list(meta_list: &syn::MetaList) -> Vec<String> {
         meta_list
             .nested
@@ -327,8 +286,9 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
         };
 
         structs.iter().for_each(|(other_name, other)| {
-
-            if name == other_name { return }
+            if name == other_name {
+                return;
+            }
             let name = Ident::new(name, Span::call_site());
             let other_name = Ident::new(other_name, Span::call_site());
             let missing_fields = strukt.missing_fields_from(other);
@@ -337,23 +297,30 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                 .filter(|f| !f.default)
                 .collect::<Vec<_>>();
 
-            
-            let default_field_setters = missing_fields.iter().filter(|f| f.default).fold(quote!{}, |acc, field| {
-                let field_name = field.name();
-                quote! {
-                    #acc
-                    #field_name: Default::default(),
-                }
-            });
-            
+            let default_field_setters =
+                missing_fields
+                    .iter()
+                    .filter(|f| f.default)
+                    .fold(quote! {}, |acc, field| {
+                        let field_name = field.name();
+                        quote! {
+                            #acc
+                            #field_name: Default::default(),
+                        }
+                    });
+
             if missing_fields_without_defaults.is_empty() {
-                let common_field_setters = strukt.same_fields_as(other).iter().fold(quote!{}, |acc, field| {
-                    let field_name = &field.name();
-                    quote! {
-                        #acc
-                        #field_name: other.#field_name,
-                    }
-                });
+                let common_field_setters =
+                    strukt
+                        .same_fields_as(other)
+                        .iter()
+                        .fold(quote! {}, |acc, field| {
+                            let field_name = &field.name();
+                            quote! {
+                                #acc
+                                #field_name: other.#field_name,
+                            }
+                        });
 
                 output = quote! {
                     #output
@@ -368,24 +335,19 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                 };
             }
             if !missing_fields.is_empty() {
-                let common_field_setters = strukt.same_fields_as(other).iter().fold(quote!{}, |acc, field| {
-                    let field_name = field.name();
-                    quote! {
-                        #acc
-                        #field_name: self.#field_name,
-                    }
-                });
-               
-                let into_args = missing_fields.iter().fold(quote!{}, |acc, field| {
-                    let field_name = field.name();
-                    let field_ty = &field.field.ty;
-                    quote! {
-                        #acc
-                        #field_name: #field_ty,
-                    }
-                });
+                let common_field_setters =
+                    strukt
+                        .same_fields_as(other)
+                        .iter()
+                        .fold(quote! {}, |acc, field| {
+                            let field_name = field.name();
+                            quote! {
+                                #acc
+                                #field_name: self.#field_name,
+                            }
+                        });
 
-                let into_defaults_args = missing_fields_without_defaults.iter().fold(quote!{}, |acc, field| {
+                let into_args = missing_fields.iter().fold(quote! {}, |acc, field| {
                     let field_name = field.name();
                     let field_ty = &field.field.ty;
                     quote! {
@@ -394,29 +356,38 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                     }
                 });
 
-                let into_missing_setters = missing_fields
-                    .iter()
-                    .fold(quote! {}, |acc, field| {
-                        let field_name = field.name();
-                        quote! { #acc #field_name, }
-                    });
+                let into_defaults_args =
+                    missing_fields_without_defaults
+                        .iter()
+                        .fold(quote! {}, |acc, field| {
+                            let field_name = field.name();
+                            let field_ty = &field.field.ty;
+                            quote! {
+                                #acc
+                                #field_name: #field_ty,
+                            }
+                        });
 
-                let into_defaults_missing_setters = missing_fields_without_defaults
-                    .iter()
-                    .fold(quote! {}, |acc, field| {
-                        let field_name = field.name();
-                        quote! { #acc #field_name, }
-                    });
+                let into_missing_setters = missing_fields.iter().fold(quote! {}, |acc, field| {
+                    let field_name = field.name();
+                    quote! { #acc #field_name, }
+                });
+
+                let into_defaults_missing_setters =
+                    missing_fields_without_defaults
+                        .iter()
+                        .fold(quote! {}, |acc, field| {
+                            let field_name = field.name();
+                            quote! { #acc #field_name, }
+                        });
 
                 let into_defaults_fn_name = Ident::new(
                     &format!("into{}_defaults", name).to_snake_case(),
-                    Span::call_site()
+                    Span::call_site(),
                 );
-                
-                let into_fn_name = Ident::new(
-                    &format!("into{}", name).to_snake_case(),
-                    Span::call_site()
-                );
+
+                let into_fn_name =
+                    Ident::new(&format!("into{}", name).to_snake_case(), Span::call_site());
 
                 output = quote! {
                     #output
@@ -438,7 +409,6 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                     }
                 };
             }
-
         })
     });
 
@@ -452,24 +422,26 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
 
 #[cfg(test)]
 mod test {
-  use crate::util::pretty_print;
+    use crate::util::pretty_print;
 
-use super::*;
+    use super::*;
     use quote::quote;
 
+    #[test]
+    fn snapshot_test() {
+        let output = boilermates(
+            quote! { "StructWithX", "StructWithoutY" },
+            quote! {
+              pub struct MainStruct {
+                pub field: String,
+                #[boilermates(only_in = "StructWithX")]
+                pub x: u32,
+                #[boilermates(not_in = "StructWithoutY")]
+                pub y: i32,
+              }
+            },
+        );
 
-  #[test]
-  fn snapshot_test() {
-    let output = boilermates(quote! { "StructWithX", "StructWithoutY" }, quote! {
-      pub struct MainStruct {
-        pub field: String,
-        #[boilermates(only_in = "StructWithX")]
-        pub x: u32,
-        #[boilermates(not_in = "StructWithoutY")]
-        pub y: i32,
-      }
-    });
-
-    insta::assert_snapshot!(pretty_print(output));
-  }
+        insta::assert_snapshot!(pretty_print(output));
+    }
 }
