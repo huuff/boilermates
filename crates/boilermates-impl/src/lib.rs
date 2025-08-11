@@ -1,104 +1,23 @@
 mod attributes;
+mod model;
 mod util;
 
 use attributes::{BoilermatesFieldAttribute, BoilermatesStructAttribute};
-use heck::{ToPascalCase, ToSnakeCase};
-use indexmap::IndexMap;
+use heck::ToSnakeCase;
+use itertools::Itertools;
+use model::{OutputField, OutputStructs};
 use proc_macro2::{Ident, Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
-    parse::Parser, punctuated::Punctuated, Attribute, AttributeArgs, Data, DataStruct, DeriveInput,
-    Field, Fields, FieldsNamed, Lit, NestedMeta, Token,
+    Data, DataStruct, DeriveInput, Field,
+    Fields, FieldsNamed,
 };
-
-#[derive(Clone)]
-struct FieldConfig {
-    field: Field,
-    default: bool,
-}
-
-impl FieldConfig {
-    fn new(field: Field, default: bool) -> Self {
-        Self { field, default }
-    }
-
-    fn name(&self) -> Ident {
-        self.field
-            .ident
-            .clone()
-            .unwrap_or_else(|| panic!("Can't get field name. This should never happen."))
-    }
-
-    fn trait_name(&self) -> Ident {
-        Ident::new(
-            &format!("Has{}", &self.name().to_string().to_pascal_case()),
-            Span::call_site(),
-        )
-    }
-
-    fn neg_trait_name(&self) -> Ident {
-        Ident::new(
-            &format!("HasNo{}", &self.name().to_string().to_pascal_case()),
-            Span::call_site(),
-        )
-    }
-}
-
-impl PartialEq for FieldConfig {
-    fn eq(&self, other: &Self) -> bool {
-        self.name() == other.name()
-    }
-}
-
-impl From<Field> for FieldConfig {
-    fn from(field: Field) -> Self {
-        Self::new(field, false)
-    }
-}
-
-impl From<FieldConfig> for Field {
-    fn from(field_config: FieldConfig) -> Self {
-        field_config.field
-    }
-}
-
-struct Struct {
-    attrs: Vec<Attribute>,
-    fields: Vec<FieldConfig>,
-}
-
-impl Struct {
-    fn missing_fields_from(&self, other: &Self) -> Vec<FieldConfig> {
-        self.fields.iter().fold(vec![], |mut acc, field| {
-            if !other.fields.contains(field) {
-                acc.push(field.clone())
-            }
-            acc
-        })
-    }
-
-    fn same_fields_as(&self, other: &Self) -> Vec<FieldConfig> {
-        self.fields.iter().fold(vec![], |mut acc, field| {
-            if other.fields.contains(field) {
-                acc.push(field.clone())
-            }
-            acc
-        })
-    }
-}
 
 pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
     let mut item: DeriveInput = syn::parse2(item).unwrap();
-    let attrs: AttributeArgs = Punctuated::<NestedMeta, Token![,]>::parse_terminated
-        .parse2(attrs)
-        .unwrap()
-        .into_iter()
-        .collect();
 
-    // indexmap so the order is deterministic and predictable
-    let mut structs = IndexMap::<String, Struct>::new();
+    let mut structs = OutputStructs::initialize(&item, attrs).unwrap();
 
-    // Get the struct fields
     let Data::Struct(data_struct) = item.data.clone() else {
         panic!("Expected a struct");
     };
@@ -107,47 +26,22 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
         panic!("Expected a struct with named fields");
     };
 
-    attrs.into_iter().for_each(|arg| {
-        match arg {
-            NestedMeta::Lit(Lit::Str(lit)) => {
-                let struct_name = lit.value().trim_matches('"').to_owned();
-                // new_structs.add(struct_name);
-                structs.insert(
-                    struct_name,
-                    Struct {
-                        attrs: vec![],
-                        fields: vec![],
-                    },
-                );
-            }
-            _ => panic!("Expected a string literal"),
-        }
-    });
-
     for struct_attr in BoilermatesStructAttribute::extract(&mut item.attrs).unwrap() {
         match struct_attr {
             BoilermatesStructAttribute::AttrFor(attr_for) => {
                 structs
                     .get_mut(&attr_for.target_struct)
                     .unwrap()
-                    .attrs
+                    .attributes
                     .push(attr_for.attribute);
             }
         }
     }
 
-    structs.insert(
-        item.ident.to_string(),
-        Struct {
-            attrs: item.attrs.clone(),
-            fields: vec![],
-        },
-    );
-
     let mut traits = quote! {};
 
     fields.named.iter_mut().for_each(|field| {
-        let mut add_to = structs.keys().cloned().collect::<Vec<_>>();
+        let mut add_to = structs.names().map(<_>::to_owned).collect_vec();
         let mut default = false;
 
         for boilermates_attr in BoilermatesFieldAttribute::extract(&mut field.attrs).unwrap() {
@@ -161,12 +55,12 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
             }
         }
 
-        let field = FieldConfig::new(field.clone(), default);
+        let field = OutputField::new(field.clone(), default);
         let trait_name = field.trait_name();
         let neg_trait_name = field.neg_trait_name();
         let field_name = field.name();
         let setter_fn = Ident::new(&format!("set_{}", field_name), Span::call_site());
-        let field_ty = &field.field.ty;
+        let field_ty = &field.definition.ty;
         traits = quote! {
             #traits
             trait #trait_name {
@@ -177,7 +71,8 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
             trait #neg_trait_name {}
         };
 
-        structs.iter_mut().for_each(|(struct_name, strukt)| {
+        for (struct_name, strukt) in &mut structs {
+            // MAYBE we don't need to store names and strings and can store idents directly?
             let struct_ident = Ident::new(struct_name, Span::call_site());
 
             if add_to.contains(struct_name) {
@@ -201,13 +96,13 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                     impl #neg_trait_name for #struct_ident {}
                 };
             }
-        });
+        }
     });
 
     let mut output = quote! {};
-    structs.iter().for_each(|(name, strukt)| {
+    for (name, strukt) in &structs {
         let out_struct = DeriveInput {
-            attrs: strukt.attrs.clone(),
+            attrs: strukt.attributes.clone(),
             data: Data::Struct(DataStruct {
                 fields: Fields::Named(FieldsNamed {
                     named: strukt
@@ -228,9 +123,9 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
             #out_struct
         };
 
-        structs.iter().for_each(|(other_name, other)| {
+        for (other_name, other) in &structs {
             if name == other_name {
-                return;
+                continue;
             }
             let name = Ident::new(name, Span::call_site());
             let other_name = Ident::new(other_name, Span::call_site());
@@ -292,7 +187,7 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
 
                 let into_args = missing_fields.iter().fold(quote! {}, |acc, field| {
                     let field_name = field.name();
-                    let field_ty = &field.field.ty;
+                    let field_ty = &field.definition.ty;
                     quote! {
                         #acc
                         #field_name: #field_ty,
@@ -304,7 +199,7 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                         .iter()
                         .fold(quote! {}, |acc, field| {
                             let field_name = field.name();
-                            let field_ty = &field.field.ty;
+                            let field_ty = &field.definition.ty;
                             quote! {
                                 #acc
                                 #field_name: #field_ty,
@@ -352,8 +247,8 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
                     }
                 };
             }
-        })
-    });
+        }
+    }
 
     output = quote! {
         #output
