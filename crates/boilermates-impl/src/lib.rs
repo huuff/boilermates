@@ -16,6 +16,8 @@ use syn::{
 pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
     let mut item: DeriveInput = syn::parse2(item).unwrap();
 
+    // XXX: must do this first to remove all boilermates attributes before initializing the output
+    let stuct_attrs = BoilermatesStructAttribute::extract(&mut item.attrs).unwrap();
     let mut structs = OutputStructs::initialize(&item, attrs).unwrap();
 
     let Data::Struct(data_struct) = item.data.clone() else {
@@ -26,7 +28,7 @@ pub fn boilermates(attrs: TokenStream2, item: TokenStream2) -> TokenStream2 {
         panic!("Expected a struct with named fields");
     };
 
-    for struct_attr in BoilermatesStructAttribute::extract(&mut item.attrs).unwrap() {
+    for struct_attr in stuct_attrs {
         match struct_attr {
             BoilermatesStructAttribute::AttrFor(attr_for) => {
                 structs
