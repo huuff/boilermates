@@ -15,7 +15,7 @@ impl BoilermatesStructAttribute {
     pub fn extract(attributes: &mut Vec<Attribute>) -> Result<Vec<Self>, anyhow::Error> {
         use itertools::Itertools as _;
 
-        let (non_boilermates_attrs, boilermates_attrs) = std::mem::take(attributes)
+        let (boilermates_attrs, non_boilermates_attrs) = std::mem::take(attributes)
             .into_iter()
             .partition(is_boilermates);
 
@@ -97,7 +97,7 @@ impl BoilermatesFieldAttribute {
     ) -> Result<Vec<BoilermatesFieldAttribute>, anyhow::Error> {
         use itertools::Itertools as _;
 
-        let (non_boilermates_attrs, boilermates_attrs) = std::mem::take(attributes)
+        let (boilermates_attrs, non_boilermates_attrs) = std::mem::take(attributes)
             .into_iter()
             .partition(is_boilermates);
 
@@ -116,7 +116,7 @@ impl BoilermatesFieldAttribute {
                         Some("only_in") => Ok(BoilermatesFieldAttribute::OnlyIn(
                             BoilermatesOnlyIn(extract_nested_list(attr)),
                         )),
-                        Some("not in") => Ok(BoilermatesFieldAttribute::NotIn(BoilermatesNotIn(
+                        Some("not_in") => Ok(BoilermatesFieldAttribute::NotIn(BoilermatesNotIn(
                             extract_nested_list(attr),
                         ))),
                         _ => Err(anyhow::anyhow!("unknown boilermates attribute")),
