@@ -17,3 +17,7 @@ prettyplease = { version = "0.1" }
 insta = { version = "1" }
 indexmap = { version = "2" }
 heck = { version = "0.5" }
+nestify = { version = "0.3"}
+anyhow = { version = "1" }
+itertools = { version = "0.14" }
+derive_more = { version = "2" }

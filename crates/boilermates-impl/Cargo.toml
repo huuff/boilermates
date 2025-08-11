@@ -9,6 +9,10 @@ proc-macro2 = { workspace = true }
 quote = { workspace = true } 
 indexmap = { workspace = true }
 heck = { workspace = true }
+nestify = { workspace = true }
+anyhow = { workspace = true }
+itertools = { workspace = true }
+derive_more = { workspace = true, features = ["constructor", "into_iterator"] }
 
 [dev-dependencies]
 prettyplease = { workspace = true }
